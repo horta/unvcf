@@ -1,0 +1,6 @@
+include CHANGELOG.md
+include LICENSE.md
+include README.md
+include unvcf/test/ALL.chr9.vcf
+include unvcf/test/CEU.exon.2010_03.genotypes.vcf
+include unvcf/test/LWK.exon.2010_03.genotypes.vcf
