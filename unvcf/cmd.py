@@ -4,7 +4,7 @@ import re
 from os.path import join, abspath
 from os.path import basename
 import dask
-import dask.dataframe as dd
+from dask.dataframe import read_csv
 from tqdm import tqdm
 
 NEWLINE = '\n'
@@ -62,54 +62,58 @@ def parse_metainfo(f):
 
 def define_format_filenames(fp, dst, data):
     name = basename(fp)
-    assoc = dict()
+    format_files = dict()
     dst = abspath(dst)
     print("Sample-based files:")
     for d in data:
         f = join(dst, "{}.{}.csv".format(name, d['id']))
-        assoc[d['id']] = f
+        format_files[d['id']] = dict(
+            stream=None, filepath=f, description=d['line'])
         print("- {}={}".format(d['id'], basename(f)))
-    return assoc
+    return format_files
 
 
-def process_format(df, format_files):
+def process_format_head(first_row, format_files):
+    for k in format_files:
+        fp = format_files[k]['filepath']
+        f = open(fp, 'w')
+        format_files[k]['stream'] = f
+        f.write(SEP.join(first_row.index.values))
+    return format_files
+
+
+def process_format(df, format_files, metadata):
 
     rows = df.iterrows()
-    row = next(rows)
-    series = row[1][9:]
-    nsamples = len(series)
+    first_row = next(rows)[1][9:]
+    nsamples = len(first_row)
 
-    written = dict()
-    for k in format_files:
-        fp = format_files[k]
-        f = open(fp, 'w')
-        format_files[k] = (fp, f)
-        f.write(SEP.join(series.index.values))
-        written[k] = False
+    format_files = process_format_head(first_row, format_files)
+    written = {k: False for k in format_files}
 
-    for i, row in tqdm(rows, desc='Genotype'):
+    for _, row in tqdm(rows, desc='Genotype'):
         formats = row[8].split(':')
-        series = row[9:]
+        row = row[9:]
 
-        for _, f in format_files.values():
-            f.write(NEWLINE)
+        for f in format_files.values():
+            f['stream'].write(NEWLINE)
 
-        for j, c in enumerate(series):
-            for l, v in enumerate(c.split(':')):
-                f = format_files[formats[l]][1]
+        for i, sample in enumerate(row):
+            for j, v in enumerate(sample.split(':')):
+                f = format_files[formats[j]]['stream']
                 f.write(v)
-                written[formats[l]] = True
-                if j < nsamples - 1:
+                written[formats[j]] = True
+                if i < nsamples - 1:
                     f.write(SEP)
 
         for f in written:
             if written[f]:
                 written[f] = False
             else:
-                format_files[f][1].write(NEWLINE)
+                format_files[f]['stream'].write(NEWLINE)
 
     for f in format_files.values():
-        f[1].close()
+        f['stream'].close()
 
 
 def unvcf(fp, dst):
@@ -119,13 +123,13 @@ def unvcf(fp, dst):
 
     sys.stdout.write("Warming up the engine... ")
     sys.stdout.flush()
-    df = dd.read_csv(fp, header=hidx, sep='\t', dtype=str)
+    df = read_csv(fp, header=hidx, sep='\t', dtype=str)
     sys.stdout.write('done.\n')
 
     print("Destination folder: {}".format(abspath(dst)))
 
     format_files = define_format_filenames(fp, dst, metadata['format'])
-    process_format(df, format_files)
+    process_format(df, format_files, metadata['format'])
 
     print("Finished successfully!")
 
