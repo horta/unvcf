@@ -9,7 +9,7 @@ if __name__ == '__main__':
     except (ImportError, RuntimeError, OSError):
         long_description = readme
 
-    console_scripts = ["unvcf = unvcf.cmd:entry_point"]
+    console_scripts = ["unvcf = unvcf._cmd:entry_point"]
     setup(
         entry_points=dict(console_scripts=console_scripts),
         long_description=long_description)

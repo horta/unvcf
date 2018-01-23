@@ -1,6 +1,6 @@
 from __future__ import absolute_import as _
 
-from .cmd import unvcf
+from ._cmd import unvcf
 from .testit import test
 
 __version__ = '0.1.0'
