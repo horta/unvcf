@@ -96,11 +96,11 @@ def process_metainfo_line(line):
 
 
 class Metadata(object):
-    def __init__(self, fp):
+    def __init__(self, fp, verbosity):
         self._data = dict()
         self._line = dict(default=[])
         self._version = None
-
+        self._verbosity = verbosity
         self._header_idx = 0
 
         with open(fp, 'r') as f:
@@ -119,6 +119,8 @@ class Metadata(object):
                 if self._know_field(line):
                     self._append(line)
                 else:
+                    if verbosity > 1:
+                        print("Unknown meta-information line: {}".format(line))
                     self._line['default'].append(line)
 
     def _parse_file_header(self, line):
@@ -126,6 +128,9 @@ class Metadata(object):
         if m is None:
             raise RuntimeError("Could not parse file header: {}".format(line))
         self._version = m.groups()[0]
+
+        if self._verbosity > 1:
+            print("File format: {}".format(self._version))
 
     def _know_field(self, line):
         return (line.startswith("##FORMAT") or line.startswith("##INFO")
@@ -199,6 +204,10 @@ class Files(object):
         for k in self._data:
             self._data[k]['stream'].close()
 
+    def print_files(self):
+        for k in sorted(self._data.keys(), key=lambda v: str(v)):
+            print("- " + self._data[k]['filename'])
+
 
 def save_info_head(source_fp, files, metadata):
     lines = dict()
@@ -259,11 +268,13 @@ def write_genotype_files(metadata, info, files):
             files[k]['stream'].write(NEWLINE + '0')
 
 
-def fetch_dask_dataframe(filepath, header_idx):
-    sys.stdout.write("Warming up the engine... ")
-    sys.stdout.flush()
+def fetch_dask_dataframe(filepath, header_idx, verbosity):
+    if verbosity > 0:
+        sys.stdout.write("Warming up the engine... ")
+        sys.stdout.flush()
     df = read_csv(filepath, header=header_idx, sep='\t', dtype=str)
-    sys.stdout.write('done.\n')
+    if verbosity > 0:
+        sys.stdout.write('done.\n')
     return df
 
 
@@ -320,9 +331,12 @@ class DataFrameProcessor(object):
             self._files.stream(('format', k)).write(v)
 
 
-def unvcf(fp, dst):
+def unvcf(fp, dst, verbosity):
 
-    metadata = Metadata(fp)
+    if verbosity > 0:
+        print("Destination folder: {}".format(abspath(dst)))
+
+    metadata = Metadata(fp, verbosity)
     files = Files(dst)
 
     files.append('default', '{}.default.csv'.format(basename(fp)))
@@ -333,21 +347,42 @@ def unvcf(fp, dst):
     for k, v in metadata.info.items():
         files.append(('info', k), '{}.genotype.{}.csv'.format(basename(fp), k))
 
-    df = fetch_dask_dataframe(fp, metadata.header_idx)
+    if verbosity > 0:
+        print("Files that are being generated:")
+        files.print_files()
+
+    df = fetch_dask_dataframe(fp, metadata.header_idx, verbosity)
 
     dfp = DataFrameProcessor(df, metadata, files)
     dfp.parse_header()
     dfp.parse_body()
 
     files.close()
-    print("Finished successfully!")
+    if verbosity > 0:
+        print("Finished successfully!")
 
 
 def entry_point():
+    from unvcf import __version__
+
     desc = 'Split VCF file into intelligible tab-delimited files.'
     parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('vcf_file', type=str, help='file path to a VCF file')
     parser.add_argument('dst_dir', type=str, help='directory destination')
+    parser.add_argument(
+        '--verbose', help="increase output verbosity", action="store_true")
+    parser.add_argument(
+        '--quiet', help="decrease output verbosity", action="store_true")
+    parser.add_argument(
+        '--version',
+        action='version',
+        version='%(prog)s {}'.format(__version__))
     args = parser.parse_args()
 
-    unvcf(args.vcf_file, args.dst_dir)
+    verbosity = 1
+    if args.verbose:
+        verbosity += 1
+    if args.quiet:
+        verbosity -= 1
+
+    unvcf(args.vcf_file, args.dst_dir, verbosity)
