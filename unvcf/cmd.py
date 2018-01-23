@@ -56,15 +56,6 @@ def parse_dict(keys, fields, sep, assoc):
     }
 
 
-def field_header(field):
-    try:
-        number = int(field['Number'])
-        number = max(1, number)
-        return SEP.join([str(i) for i in range(number)])
-    except ValueError:
-        return SEP.join([field['Number']])
-
-
 def add_missing_fields(fields, spec):
     miss = set(spec.keys()) - set(fields.keys())
     for k in miss:
@@ -228,65 +219,6 @@ class Files(object):
             print("- " + self._data[k]['filename'])
 
 
-def save_info_head(source_fp, files, metadata):
-    lines = dict()
-    field_len = dict()
-    for m in metadata:
-        lines[m['fields']['ID'][0]] = m['line']
-        field_len[m['fields']['ID'][0]] = int(m['fields']['Number'][0])
-
-    for k in files:
-        fp = files[k]['filepath']
-        f = open(fp, 'w')
-        files[k]['stream'] = f
-        f.write("##SOURCE={}{}".format(source_fp, NEWLINE))
-        f.write(lines[k])
-        f.write(NEWLINE)
-        n = max(field_len[k], 1)
-        f.write(SEP.join([str(i) for i in range(n)]))
-    return files
-
-
-def save_format_head(source_fp, sample_ids, files, metadata):
-    lines = dict()
-    for m in metadata:
-        lines[m['fields']['ID'][0]] = m['line']
-    for k in files:
-        fp = files[k]['filepath']
-        f = open(fp, 'w')
-        files[k]['stream'] = f
-        f.write("##SOURCE={}{}".format(source_fp, NEWLINE))
-        f.write(lines[k])
-        f.write(NEWLINE)
-        f.write(SEP.join(sample_ids))
-    return files
-
-
-def parse_genotype_info(geno_info):
-    r = dict()
-    for v in geno_info.split(';'):
-        vk = v.split('=')
-        if len(vk) == 1:
-            r[vk[0]] = []
-        elif len(vk) == 2:
-            r[vk[0]] = [vk[1]]
-    return r
-
-
-def write_genotype_files(metadata, info, files):
-    ids = [m['fields']['ID'][0] for m in metadata]
-    written = {id_: False for id_ in ids}
-    for k in info:
-        if len(info[k]) > 0:
-            files[k]['stream'].write(NEWLINE + ';'.join(info[k]))
-        else:
-            files[k]['stream'].write(NEWLINE + '1')
-        written[k] = True
-    for k in written:
-        if not written[k]:
-            files[k]['stream'].write(NEWLINE + '0')
-
-
 def fetch_dask_dataframe(filepath, header_idx, verbosity):
     if verbosity > 0:
         sys.stdout.write("Warming up the engine... ")
@@ -311,8 +243,7 @@ class DataFrameProcessor(object):
         self._files.stream('default').write(SEP.join(self._default))
 
         for k in self._metadata.info:
-            v = field_header(self._metadata.info[k])
-            self._files.stream(('info', k)).write(v)
+            self._files.stream(('info', k)).write(k)
 
         for k in self._metadata.format:
             self._files.stream(('format', k)).write(SEP.join(self._samples))
