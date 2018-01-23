@@ -113,8 +113,6 @@ include unvcf/test/data/idx.vcf
 include unvcf/test/data/plugin-missing2ref.vcf
 include unvcf/test/data/annots4.vcf
 include unvcf/test/data/annotate10.vcf
-include unvcf/test/data/region.vcf
+include unvcf/test/data/region.vcf.gz
 include unvcf/test/data/view.vectors.2.vcf
-include unvcf/test/data/LWK.exon.2010_03.genotypes.vcf.gz
-include unvcf/test/data/ALL.chr9.vcf.gz
 include unvcf/test/data/CEU.exon.2010_03.genotypes.vcf.bz2
