@@ -4,7 +4,7 @@ platform: x64
 configuration: Release
 
 environment:
-    PKG_NAME: pandas_plink
+    PKG_NAME: unvcf
     PYTHON: "C:\\Python36-x64"
 
 install:
