@@ -242,8 +242,8 @@ class DataFrameProcessor(object):
         self._samples = self._df.columns[9:]
         self._files.stream('default').write(SEP.join(self._default))
 
-        for k in self._metadata.info:
-            self._files.stream(('info', k)).write(k)
+        info_ids = sorted(self._metadata.info.keys())
+        self._files.stream('info').write(SEP.join(info_ids))
 
         for k in self._metadata.format:
             self._files.stream(('format', k)).write(SEP.join(self._samples))
@@ -260,9 +260,9 @@ class DataFrameProcessor(object):
         info = parse_dict(None, row.iloc[7], ';', self._metadata.info)
 
         add_missing_fields(info, self._metadata.info)
-        for k in info:
-            v = NEWLINE + ','.join(info[k])
-            self._files.stream(('info', k)).write(v)
+
+        v = SEP.join([','.join(info[k]) for k in sorted(info.keys())])
+        self._files.stream('info').write(NEWLINE + v)
 
         keys = row.iloc[8].split(':')
         line = {k: [] for k in self._metadata.format.keys()}
@@ -292,8 +292,7 @@ def unvcf(fp, dst, verbosity):
     for k, v in metadata.format.items():
         files.append(('format', k), '{}.sample.{}.csv'.format(basename(fp), k))
 
-    for k, v in metadata.info.items():
-        files.append(('info', k), '{}.genotype.{}.csv'.format(basename(fp), k))
+    files.append('info', '{}.genotype.csv'.format(basename(fp)))
 
     if verbosity > 0:
         print("Files that are being generated:")
