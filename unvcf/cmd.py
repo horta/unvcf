@@ -148,8 +148,8 @@ class Metadata(object):
             print("File format: {}".format(self._version))
 
     def _know_field(self, line):
-        return (line.startswith("##FORMAT") or line.startswith("##INFO")
-                or line.startswith("##FILTER"))
+        ok = line.startswith("##FORMAT") or line.startswith("##INFO")
+        return ok or line.startswith("##FILTER")
 
     @property
     def header_idx(self):
@@ -242,12 +242,13 @@ def fetch_dask_dataframe(filepath, header_idx, verbosity):
 
 
 class DataFrameProcessor(object):
-    def __init__(self, df, metadata, files):
+    def __init__(self, df, metadata, files, verbosity):
         self._df = df
         self._metadata = metadata
         self._files = files
         self._default = None
         self._samples = None
+        self._verbosity = verbosity
 
     def parse_header(self):
         self._default = self._df.columns[:7]
@@ -265,7 +266,8 @@ class DataFrameProcessor(object):
 
     def parse_body(self):
         rows = self._df.iterrows()
-        for row in tqdm(rows, unit=' genotypes'):
+        dis = self._verbosity == 0
+        for row in tqdm(rows, unit=' genotypes', disable=dis):
             self._parse_row(row[1])
 
     def _parse_row(self, row):
@@ -321,7 +323,7 @@ def unvcf(fp, dst, verbosity):
 
     df = fetch_dask_dataframe(fp, metadata.header_idx, verbosity)
 
-    dfp = DataFrameProcessor(df, metadata, files)
+    dfp = DataFrameProcessor(df, metadata, files, verbosity)
     dfp.parse_header()
     dfp.parse_body()
 
