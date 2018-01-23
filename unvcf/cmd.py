@@ -1,14 +1,160 @@
 import argparse
-import sys
 import re
-from os.path import join, abspath
-from os.path import basename
-import dask
+import sys
+from os.path import abspath, basename, join
+
 from dask.dataframe import read_csv
 from tqdm import tqdm
 
 NEWLINE = '\n'
 SEP = '\t'
+UNIQ_SEP = '\uDCDC'
+
+
+def field_header(field):
+    try:
+        number = int(field['Number'])
+        number = max(1, number)
+        return SEP.join([str(i) for i in range(number)])
+    except ValueError:
+        return SEP.join([field['Number']])
+
+
+def default_field_value(number):
+    try:
+        number = int(number)
+        if number == 0:
+            return []
+        raise RuntimeError
+    except ValueError:
+        import pdb
+        pdb.set_trace()
+        pass
+
+
+def update_fields(fields, spec):
+    miss = set(spec.keys()) - set(fields.keys())
+    for k in miss:
+        fields[k] = default_field_value(spec[k]['Number'])
+
+
+def replace_open_mark(s, sep, mark):
+    inside = False
+    escaping = False
+    s = list(s)
+    for i in range(len(s)):
+        if s[i] == "\\":
+            escaping ^= escaping
+        elif s[i] == "\"":
+            if not escaping:
+                inside ^= True
+        elif s[i] == sep:
+            if not inside:
+                s[i] = mark
+    return "".join(s)
+
+
+def parse_dict(keys, fields, sep):
+    fields = fields.split(sep)
+    return {k: fields[i] for (i, k) in enumerate(keys)}
+
+
+def parse_dict_plural_fields(fields, sep):
+    fields = fields.split(sep)
+    r = dict()
+    for f in fields:
+        f = f.split('=')
+        r[f[0]] = f[1:]
+    return r
+
+
+def parse_dict_singular_fields(fields, sep):
+    fields = fields.split(sep)
+    r = dict()
+    for f in fields:
+        f = f.split('=')
+        r[f[0]] = f[1]
+    return r
+
+
+def parse_metainfo_fields(line):
+    left = line.find("<") + 1
+    right = len(line) - line[::-1].find(">") - 1
+    line = replace_open_mark(line[left:right], ',', UNIQ_SEP)
+    return parse_dict_singular_fields(line, UNIQ_SEP)
+
+
+def process_metainfo_line(line):
+
+    m = re.compile(r"##([a-zA-Z]+)=.*").search(line)
+    if m is None:
+        raise RuntimeError("Could not parse {}.".format(line))
+
+    key = m.groups()[0]
+
+    return (key, parse_metainfo_fields(line))
+
+
+class Metadata(object):
+    def __init__(self, fp):
+        self._data = dict()
+        self._line = dict(default=[])
+        self._version = None
+
+        self._header_idx = 0
+
+        with open(fp, 'r') as f:
+
+            line = f.readline().strip()
+            self._parse_file_header(line)
+            self._line['default'].append(line)
+
+            while line is not None:
+                line = f.readline().strip()
+                self._header_idx += 1
+
+                if len(line) < 2 or line[:2] != '##':
+                    break
+
+                if self._know_field(line):
+                    self._append(line)
+                else:
+                    self._line['default'].append(line)
+
+    def _parse_file_header(self, line):
+        m = re.compile(r'^##fileformat=(.*)$').search(line)
+        if m is None:
+            raise RuntimeError("Could not parse file header: {}".format(line))
+        self._version = m.groups()[0]
+
+    def _know_field(self, line):
+        return (line.startswith("##FORMAT") or line.startswith("##INFO")
+                or line.startswith("##FILTER"))
+
+    @property
+    def header_idx(self):
+        return self._header_idx
+
+    def _append(self, line):
+        key, field = process_metainfo_line(line)
+
+        self._line[(key, field['ID'])] = line.strip()
+
+        if key not in self._data:
+            self._data[key] = []
+
+        self._data[key].append(field)
+
+    @property
+    def format(self):
+        return {d['ID']: d for d in self._data['FORMAT']}
+
+    @property
+    def info(self):
+        return {d['ID']: d for d in self._data['INFO']}
+
+    def line(self, field):
+        self._line[field]
 
 
 def get_header_index(fp):
@@ -37,100 +183,163 @@ def process_metainfo_format(line):
     return m.groups()[0]
 
 
-def process_metainfo_line(line):
-    if len(line) > 5 and line[2:6] == 'INFO':
-        return ('info', process_metainfo_info(line))
-    if len(line) > 7 and line[2:8] == 'FORMAT':
-        return ('format', process_metainfo_format(line))
-    return None
+class Files(object):
+    def __init__(self, dst):
+        self._dst = dst
+        self._data = dict()
+
+    def append(self, key, filename):
+        f = open(join(self._dst, filename), 'w')
+        self._data[key] = dict(filename=filename, stream=f)
+
+    def stream(self, key):
+        return self._data[key]['stream']
+
+    def close(self):
+        for k in self._data:
+            self._data[k]['stream'].close()
 
 
-def parse_metainfo(f):
-    idx = 0
-    data = {'info': [], 'format': []}
-    line = f.readline()
-    while line is not None:
-        if len(line) < 2 or line[:2] != '##':
-            break
-        dat = process_metainfo_line(line)
-        if dat is not None:
-            data[dat[0]].append({'id': dat[1], 'line': line})
-        idx += 1
-        line = f.readline()
-    return (idx, data)
+def save_info_head(source_fp, files, metadata):
+    lines = dict()
+    field_len = dict()
+    for m in metadata:
+        lines[m['fields']['ID'][0]] = m['line']
+        field_len[m['fields']['ID'][0]] = int(m['fields']['Number'][0])
 
-
-def define_format_filenames(fp, dst, data):
-    name = basename(fp)
-    format_files = dict()
-    dst = abspath(dst)
-    print("Sample-based files:")
-    for d in data:
-        f = join(dst, "{}.{}.csv".format(name, d['id']))
-        format_files[d['id']] = dict(
-            stream=None, filepath=f, description=d['line'])
-        print("- {}={}".format(d['id'], basename(f)))
-    return format_files
-
-
-def process_format_head(first_row, format_files):
-    for k in format_files:
-        fp = format_files[k]['filepath']
+    for k in files:
+        fp = files[k]['filepath']
         f = open(fp, 'w')
-        format_files[k]['stream'] = f
-        f.write(SEP.join(first_row.index.values))
-    return format_files
+        files[k]['stream'] = f
+        f.write("##SOURCE={}{}".format(source_fp, NEWLINE))
+        f.write(lines[k])
+        f.write(NEWLINE)
+        n = max(field_len[k], 1)
+        f.write(SEP.join([str(i) for i in range(n)]))
+    return files
 
 
-def process_format(df, format_files, metadata):
+def save_format_head(source_fp, sample_ids, files, metadata):
+    lines = dict()
+    for m in metadata:
+        lines[m['fields']['ID'][0]] = m['line']
+    for k in files:
+        fp = files[k]['filepath']
+        f = open(fp, 'w')
+        files[k]['stream'] = f
+        f.write("##SOURCE={}{}".format(source_fp, NEWLINE))
+        f.write(lines[k])
+        f.write(NEWLINE)
+        f.write(SEP.join(sample_ids))
+    return files
 
-    rows = df.iterrows()
-    first_row = next(rows)[1][9:]
-    nsamples = len(first_row)
 
-    format_files = process_format_head(first_row, format_files)
-    written = {k: False for k in format_files}
+def parse_genotype_info(geno_info):
+    r = dict()
+    for v in geno_info.split(';'):
+        vk = v.split('=')
+        if len(vk) == 1:
+            r[vk[0]] = []
+        elif len(vk) == 2:
+            r[vk[0]] = [vk[1]]
+    return r
 
-    for _, row in tqdm(rows, desc='Genotype'):
-        formats = row[8].split(':')
-        row = row[9:]
 
-        for f in format_files.values():
-            f['stream'].write(NEWLINE)
+def write_genotype_files(metadata, info, files):
+    ids = [m['fields']['ID'][0] for m in metadata]
+    written = {id_: False for id_ in ids}
+    for k in info:
+        if len(info[k]) > 0:
+            files[k]['stream'].write(NEWLINE + ';'.join(info[k]))
+        else:
+            files[k]['stream'].write(NEWLINE + '1')
+        written[k] = True
+    for k in written:
+        if not written[k]:
+            files[k]['stream'].write(NEWLINE + '0')
 
-        for i, sample in enumerate(row):
-            for j, v in enumerate(sample.split(':')):
-                f = format_files[formats[j]]['stream']
-                f.write(v)
-                written[formats[j]] = True
-                if i < nsamples - 1:
-                    f.write(SEP)
 
-        for f in written:
-            if written[f]:
-                written[f] = False
-            else:
-                format_files[f]['stream'].write(NEWLINE)
+def fetch_dask_dataframe(filepath, header_idx):
+    sys.stdout.write("Warming up the engine... ")
+    sys.stdout.flush()
+    df = read_csv(filepath, header=header_idx, sep='\t', dtype=str)
+    sys.stdout.write('done.\n')
+    return df
 
-    for f in format_files.values():
-        f['stream'].close()
+
+class DataFrameProcessor(object):
+    def __init__(self, df, metadata, files):
+        self._df = df
+        self._metadata = metadata
+        self._files = files
+        self._default = None
+        self._samples = None
+
+    def parse_header(self):
+        self._default = self._df.columns[:9]
+        self._samples = self._df.columns[9:]
+        self._files.stream('default').write(SEP.join(self._default))
+
+        for k in self._metadata.info:
+            v = field_header(self._metadata.info[k])
+            self._files.stream(('info', k)).write(v)
+
+        for k in self._metadata.format:
+            self._files.stream(('format', k)).write(SEP.join(self._samples))
+
+    def parse_body(self):
+        rows = self._df.iterrows()
+        while True:
+            try:
+                self._parse_row(next(rows)[1])
+            except StopIteration:
+                break
+
+    def _parse_row(self, row):
+        self._files.stream('default').write(NEWLINE)
+        self._files.stream('default').write(SEP.join(row.iloc[:7].values))
+
+        info = parse_dict_plural_fields(row.iloc[7], ';')
+        update_fields(info, self._metadata.info)
+        for k in info:
+            v = NEWLINE + SEP.join(info[k])
+            self._files.stream(('info', k)).write(v)
+
+        keys = row.iloc[8].split(':')
+        line = {k: [] for k in self._metadata.format.keys()}
+
+        for fields in row.iloc[9:]:
+            data = parse_dict(keys, fields, ':')
+            update_fields(data, self._metadata.format)
+
+            for k in data:
+                line[k].append(data[k])
+
+        for k in line:
+            v = NEWLINE + SEP.join(line[k])
+            self._files.stream(('format', k)).write(v)
 
 
 def unvcf(fp, dst):
 
-    with open(fp, 'r') as f:
-        (hidx, metadata) = parse_metainfo(f)
+    metadata = Metadata(fp)
+    files = Files(dst)
 
-    sys.stdout.write("Warming up the engine... ")
-    sys.stdout.flush()
-    df = read_csv(fp, header=hidx, sep='\t', dtype=str)
-    sys.stdout.write('done.\n')
+    files.append('default', '{}.default.csv'.format(basename(fp)))
 
-    print("Destination folder: {}".format(abspath(dst)))
+    for k, v in metadata.format.items():
+        files.append(('format', k), '{}.sample.{}.csv'.format(basename(fp), k))
 
-    format_files = define_format_filenames(fp, dst, metadata['format'])
-    process_format(df, format_files, metadata['format'])
+    for k, v in metadata.info.items():
+        files.append(('info', k), '{}.genotype.{}.csv'.format(basename(fp), k))
 
+    df = fetch_dask_dataframe(fp, metadata.header_idx)
+
+    dfp = DataFrameProcessor(df, metadata, files)
+    dfp.parse_header()
+    dfp.parse_body()
+
+    files.close()
     print("Finished successfully!")
 
 
