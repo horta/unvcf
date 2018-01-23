@@ -52,7 +52,6 @@ include unvcf/test/data/view.vcf
 include unvcf/test/data/merge.c.vcf
 include unvcf/test/data/merge.3.a.vcf
 include unvcf/test/data/merge.b.vcf
-include unvcf/test/data/convert.gt.noHead.vcf
 include unvcf/test/data/stats.b.vcf
 include unvcf/test/data/view.omitgenotypes.vcf
 include unvcf/test/data/annotate3.vcf

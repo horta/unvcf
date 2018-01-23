@@ -12,7 +12,7 @@ SEP = '\t'
 UNIQ_SEP = '\uDCDC'
 
 
-def default_field_value(number):
+def default_field_value_number(number):
     if number.isdigit():
         number = int(number)
         if number == 0:
@@ -21,7 +21,13 @@ def default_field_value(number):
     return ['.']
 
 
-def parse_dict_update(v, number):
+def default_field_value(assoc):
+    if 'Number' in assoc:
+        default_field_value_number(assoc['Number'])
+    return ['0']
+
+
+def parse_dict_update_number(v, number):
     if number.isdigit():
         number = int(number)
         v = v.split(',')
@@ -31,12 +37,20 @@ def parse_dict_update(v, number):
     return [v]
 
 
+def parse_dict_update(v, assoc):
+    if 'Number' in assoc:
+        return parse_dict_update_number(v, assoc['Number'])
+    # I will assume that it is a flag
+    return ['0']
+
+
 def parse_dict(keys, fields, sep, assoc):
     if keys is None:
         if fields == '.':
             fields = []
         else:
             fields = fields.split(sep)
+            fields = [f for f in fields if len(f) > 0]
         dic = dict()
         for f in fields:
             kv = f.split('=')
@@ -49,22 +63,20 @@ def parse_dict(keys, fields, sep, assoc):
             fields = ['.'] * len(keys)
         else:
             fields = fields.split(sep)
+            fields = [f for f in fields if len(f) > 0]
 
         npresent = len(fields)
         dic = {k: fields[i] for (i, k) in enumerate(keys[:npresent])}
         for k in keys[npresent:]:
             dic[k] = '.'
 
-    return {
-        k: parse_dict_update(v, assoc[k]['Number'])
-        for k, v in dic.items()
-    }
+    return {k: parse_dict_update(v, assoc[k]) for k, v in dic.items()}
 
 
 def add_missing_fields(fields, spec):
     miss = set(spec.keys()) - set(fields.keys())
     for k in miss:
-        fields[k] = default_field_value(spec[k]['Number'])
+        fields[k] = default_field_value(spec[k])
 
 
 def replace_open_mark(s, sep, mark):
@@ -138,11 +150,22 @@ class Metadata(object):
                         print("Unknown meta-information line: {}".format(line))
                     self._line['default'].append(line)
 
+        self._add_missing_required_fields()
+
+    def _add_missing_required_fields(self):
+        gt = "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">"
+        if ('FORMAT', 'GT') not in self._data:
+            self._append(gt)
+
     def _parse_file_header(self, line):
         m = re.compile(r'^##fileformat=(.*)$').search(line)
         if m is None:
-            raise RuntimeError("Could not parse file header: {}".format(line))
-        self._version = m.groups()[0]
+            if self._verbosity > 0:
+                print("[Warning] Could not parse file header: {}".format(line))
+                print("[Warning] Trying to proceed anyway.")
+            self._version = 'unknown'
+        else:
+            self._version = m.groups()[0]
 
         if self._verbosity > 1:
             print("File format: {}".format(self._version))
@@ -274,29 +297,28 @@ class DataFrameProcessor(object):
         self._files.stream('default').write(NEWLINE)
         self._files.stream('default').write(SEP.join(row.iloc[:7].values))
 
-        info = parse_dict(None, row.iloc[7], ';', self._metadata.info)
+        if len(row) > 7:
+            info = parse_dict(None, row.iloc[7], ';', self._metadata.info)
+            add_missing_fields(info, self._metadata.info)
+            if len(info) > 0:
+                v = SEP.join([','.join(info[k]) for k in sorted(info.keys())])
+                self._files.stream('info').write(NEWLINE + v)
 
-        add_missing_fields(info, self._metadata.info)
+        if len(row) > 8:
+            keys = row.iloc[8].split(':')
+            keys = [k for k in keys if len(k) > 0]
+            line = {k: [] for k in self._metadata.format.keys()}
 
-        if len(info) > 0:
-            v = SEP.join([','.join(info[k]) for k in sorted(info.keys())])
-            self._files.stream('info').write(NEWLINE + v)
+            for fields in row.iloc[9:]:
+                data = parse_dict(keys, fields, ':', self._metadata.format)
+                add_missing_fields(data, self._metadata.format)
 
-        if len(row) < 9:
-            return
-        keys = row.iloc[8].split(':')
-        line = {k: [] for k in self._metadata.format.keys()}
+                for k in data:
+                    line[k].append(data[k])
 
-        for fields in row.iloc[9:]:
-            data = parse_dict(keys, fields, ':', self._metadata.format)
-            add_missing_fields(data, self._metadata.format)
-
-            for k in data:
-                line[k].append(data[k])
-
-        for k in line:
-            v = NEWLINE + SEP.join([','.join(v) for v in line[k]])
-            self._files.stream(('format', k)).write(v)
+            for k in line:
+                v = NEWLINE + SEP.join([','.join(v) for v in line[k]])
+                self._files.stream(('format', k)).write(v)
 
 
 def unvcf(fp, dst, verbosity):
