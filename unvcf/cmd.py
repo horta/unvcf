@@ -12,24 +12,22 @@ UNIQ_SEP = '\uDCDC'
 
 
 def default_field_value(number):
-    try:
+    if number.isdigit():
         number = int(number)
         if number == 0:
             return ['0']
         return ['.']
-    except ValueError:
-        return ['.']
+    return ['.']
 
 
 def parse_dict_update(v, number):
-    try:
+    if number.isdigit():
         number = int(number)
-        if v == '.':
-            return ['.']
         v = v.split(',')
         return v + [''] * (number - len(v))
-    except ValueError:
-        return [v]
+    if v == '.':
+        return ['.']
+    return [v]
 
 
 def parse_dict(keys, fields, sep, assoc):
@@ -87,17 +85,6 @@ def replace_open_mark(s, sep, mark):
             if not inside:
                 s[i] = mark
     return "".join(s)
-
-
-def parse_dict_plural_fields(fields, sep):
-    if fields == '.':
-        return dict()
-    fields = fields.split(sep)
-    r = dict()
-    for f in fields:
-        f = f.split('=')
-        r[f[0]] = f[1:]
-    return r
 
 
 def parse_dict_singular_fields(fields, sep):
