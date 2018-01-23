@@ -11,6 +11,53 @@ SEP = '\t'
 UNIQ_SEP = '\uDCDC'
 
 
+def default_field_value(number):
+    try:
+        number = int(number)
+        if number == 0:
+            return ['0']
+        return ['.']
+    except ValueError:
+        return ['.']
+
+
+def parse_dict_update(v, number):
+    try:
+        number = int(number)
+        if v == '.':
+            return ['.']
+        v = v.split(',')
+        return v + [''] * (number - len(v))
+    except ValueError:
+        return [v]
+
+
+def parse_dict(keys, fields, sep, assoc):
+    if keys is None:
+        if fields == '.':
+            fields = []
+        else:
+            fields = fields.split(sep)
+        dic = dict()
+        for f in fields:
+            kv = f.split('=')
+            if len(kv) == 2:
+                dic[kv[0]] = kv[1]
+            else:
+                dic[kv[0]] = '1'
+    else:
+        if fields == '.':
+            fields = ['.'] * len(keys)
+        else:
+            fields = fields.split(sep)
+        dic = {k: fields[i] for (i, k) in enumerate(keys)}
+
+    return {
+        k: parse_dict_update(v, assoc[k]['Number'])
+        for k, v in dic.items()
+    }
+
+
 def field_header(field):
     try:
         number = int(field['Number'])
@@ -20,19 +67,7 @@ def field_header(field):
         return SEP.join([field['Number']])
 
 
-def default_field_value(number):
-    try:
-        number = int(number)
-        if number == 0:
-            return []
-        raise RuntimeError
-    except ValueError:
-        import pdb
-        pdb.set_trace()
-        pass
-
-
-def update_fields(fields, spec):
+def add_missing_fields(fields, spec):
     miss = set(spec.keys()) - set(fields.keys())
     for k in miss:
         fields[k] = default_field_value(spec[k]['Number'])
@@ -54,12 +89,9 @@ def replace_open_mark(s, sep, mark):
     return "".join(s)
 
 
-def parse_dict(keys, fields, sep):
-    fields = fields.split(sep)
-    return {k: fields[i] for (i, k) in enumerate(keys)}
-
-
 def parse_dict_plural_fields(fields, sep):
+    if fields == '.':
+        return dict()
     fields = fields.split(sep)
     r = dict()
     for f in fields:
@@ -287,7 +319,7 @@ class DataFrameProcessor(object):
         self._samples = None
 
     def parse_header(self):
-        self._default = self._df.columns[:9]
+        self._default = self._df.columns[:7]
         self._samples = self._df.columns[9:]
         self._files.stream('default').write(SEP.join(self._default))
 
@@ -300,34 +332,32 @@ class DataFrameProcessor(object):
 
     def parse_body(self):
         rows = self._df.iterrows()
-        while True:
-            try:
-                self._parse_row(next(rows)[1])
-            except StopIteration:
-                break
+        for row in tqdm(rows, unit=' genotypes'):
+            self._parse_row(row[1])
 
     def _parse_row(self, row):
         self._files.stream('default').write(NEWLINE)
         self._files.stream('default').write(SEP.join(row.iloc[:7].values))
 
-        info = parse_dict_plural_fields(row.iloc[7], ';')
-        update_fields(info, self._metadata.info)
+        info = parse_dict(None, row.iloc[7], ';', self._metadata.info)
+
+        add_missing_fields(info, self._metadata.info)
         for k in info:
-            v = NEWLINE + SEP.join(info[k])
+            v = NEWLINE + ','.join(info[k])
             self._files.stream(('info', k)).write(v)
 
         keys = row.iloc[8].split(':')
         line = {k: [] for k in self._metadata.format.keys()}
 
         for fields in row.iloc[9:]:
-            data = parse_dict(keys, fields, ':')
-            update_fields(data, self._metadata.format)
+            data = parse_dict(keys, fields, ':', self._metadata.format)
+            add_missing_fields(data, self._metadata.format)
 
             for k in data:
                 line[k].append(data[k])
 
         for k in line:
-            v = NEWLINE + SEP.join(line[k])
+            v = NEWLINE + SEP.join([','.join(v) for v in line[k]])
             self._files.stream(('format', k)).write(v)
 
 
