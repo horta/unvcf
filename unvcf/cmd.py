@@ -49,7 +49,11 @@ def parse_dict(keys, fields, sep, assoc):
             fields = ['.'] * len(keys)
         else:
             fields = fields.split(sep)
-        dic = {k: fields[i] for (i, k) in enumerate(keys)}
+
+        npresent = len(fields)
+        dic = {k: fields[i] for (i, k) in enumerate(keys[:npresent])}
+        for k in keys[npresent:]:
+            dic[k] = '.'
 
     return {
         k: parse_dict_update(v, assoc[k]['Number'])
@@ -297,6 +301,9 @@ def unvcf(fp, dst, verbosity):
 
     if verbosity > 0:
         print("Destination folder: {}".format(abspath(dst)))
+
+    if not os.path.exists(dst):
+        os.makedirs(dst)
 
     metadata = Metadata(fp, verbosity)
     files = Files(dst)
