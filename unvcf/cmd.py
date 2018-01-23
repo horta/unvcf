@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import sys
 from os.path import abspath, basename, join
@@ -107,7 +108,7 @@ def process_metainfo_line(line):
 
 class Metadata(object):
     def __init__(self, fp, verbosity):
-        self._data = dict()
+        self._data = dict(FORMAT=[], INFO=[])
         self._line = dict(default=[])
         self._version = None
         self._verbosity = verbosity
@@ -214,6 +215,13 @@ class Files(object):
         for k in self._data:
             self._data[k]['stream'].close()
 
+    def remove_empty(self):
+        for k in self._data:
+            f = join(self._dst, self._data[k]['filename'])
+            s = os.path.getsize(f)
+            if s == 0:
+                os.remove(f)
+
     def print_files(self):
         for k in sorted(self._data.keys(), key=lambda v: str(v)):
             print("- " + self._data[k]['filename'])
@@ -245,6 +253,9 @@ class DataFrameProcessor(object):
         info_ids = sorted(self._metadata.info.keys())
         self._files.stream('info').write(SEP.join(info_ids))
 
+        if len(self._samples) == 0:
+            return
+
         for k in self._metadata.format:
             self._files.stream(('format', k)).write(SEP.join(self._samples))
 
@@ -261,9 +272,12 @@ class DataFrameProcessor(object):
 
         add_missing_fields(info, self._metadata.info)
 
-        v = SEP.join([','.join(info[k]) for k in sorted(info.keys())])
-        self._files.stream('info').write(NEWLINE + v)
+        if len(info) > 0:
+            v = SEP.join([','.join(info[k]) for k in sorted(info.keys())])
+            self._files.stream('info').write(NEWLINE + v)
 
+        if len(row) < 9:
+            return
         keys = row.iloc[8].split(':')
         line = {k: [] for k in self._metadata.format.keys()}
 
@@ -305,6 +319,7 @@ def unvcf(fp, dst, verbosity):
     dfp.parse_body()
 
     files.close()
+    files.remove_empty()
     if verbosity > 0:
         print("Finished successfully!")
 
