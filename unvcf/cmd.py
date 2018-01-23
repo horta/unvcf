@@ -1,15 +1,45 @@
+from __future__ import unicode_literals
+
 import argparse
+import bz2
+import gzip
 import os
 import re
 import sys
+from contextlib import contextmanager
 from os.path import abspath, basename, join
 
-from dask.dataframe import read_csv
+import dask.dataframe as dd
+import pandas as pd
 from tqdm import tqdm
 
 NEWLINE = '\n'
 SEP = '\t'
 UNIQ_SEP = '\uDCDC'
+
+
+def read_csv(filepath, header_idx):
+    try:
+        return dd.read_csv(filepath, header=header_idx, sep='\t', dtype=str)
+    except UnicodeDecodeError:
+        return pd.read_csv(filepath, header=header_idx, sep='\t', dtype=str)
+
+
+def unicode_airlock(s):
+    try:
+        return s.decode()
+    except Exception:
+        return s
+
+
+@contextmanager
+def open_file(filepath):
+    if filepath.endswith(".gz"):
+        yield gzip.open(filepath, 'r')
+    elif filepath.endswith(".bz2"):
+        yield bz2.open(filepath, 'r')
+    else:
+        yield open(filepath, 'r')
 
 
 def default_field_value_number(number):
@@ -130,14 +160,14 @@ class Metadata(object):
         self._verbosity = verbosity
         self._header_idx = 0
 
-        with open(fp, 'r') as f:
+        with open_file(fp) as f:
 
-            line = f.readline().strip()
+            line = unicode_airlock(f.readline().strip())
             self._parse_file_header(line)
             self._line['default'].append(line)
 
             while line is not None:
-                line = f.readline().strip()
+                line = unicode_airlock(f.readline().strip())
                 self._header_idx += 1
 
                 if len(line) < 2 or line[:2] != '##':
@@ -158,7 +188,7 @@ class Metadata(object):
             self._append(gt)
 
     def _parse_file_header(self, line):
-        m = re.compile(r'^##fileformat=(.*)$').search(line)
+        m = re.compile(r'^##fileformat=(.*)$').search(unicode_airlock(line))
         if m is None:
             if self._verbosity > 0:
                 print("[Warning] Could not parse file header: {}".format(line))
@@ -198,18 +228,6 @@ class Metadata(object):
 
     def line(self, field):
         self._line[field]
-
-
-def get_header_index(fp):
-    idx = 0
-    with open(fp, 'r') as f:
-        line = f.readline()
-        while line is not None:
-            if len(line) < 2 or line[:2] != '##':
-                break
-            idx += 1
-            line = f.readline()
-    return idx
 
 
 def process_metainfo_info(line):
@@ -258,7 +276,8 @@ def fetch_dask_dataframe(filepath, header_idx, verbosity):
     if verbosity > 0:
         sys.stdout.write("Warming up the engine... ")
         sys.stdout.flush()
-    df = read_csv(filepath, header=header_idx, sep='\t', dtype=str)
+
+    df = read_csv(filepath, header_idx)
     if verbosity > 0:
         sys.stdout.write('done.\n')
     return df

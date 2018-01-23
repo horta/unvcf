@@ -10,11 +10,6 @@ def test_unvcf_convert():
 
     try:
         for f in get_files():
-            try:
-                unvcf(f, dirpath, 0)
-            except Exception:
-                print(f)
-                import pdb
-                pdb.set_trace()
+            unvcf(f, dirpath, 0)
     finally:
         shutil.rmtree(dirpath)
