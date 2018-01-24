@@ -1,32 +1,41 @@
 os:
-  - osx
-  - linux
-language:       python
-sudo:           false
+- osx
+- linux
+language: python
+sudo: false
 python:
-    - '3.6'
+- '3.6'
 addons:
   apt:
     packages:
-        - pandoc
-        - libffi-dev
-        - libffi6
+    - pandoc
+    - libffi-dev
+    - libffi6
 install:
-    - pushd . && cp requirements.txt ~/ && cd ~/
-    - travis_retry pip install -r requirements.txt -q
-    - rm requirements.txt && popd
+- pushd . && cp requirements.txt ~/ && cd ~/
+- travis_retry pip install -r requirements.txt -q
+- rm requirements.txt && popd
 script:
-    - python setup.py build_ext --inplace
-    - coverage run --source unvcf -m pytest
-    - python setup.py install && pip uninstall unvcf --yes
-    - python setup.py sdist
-    - pip install dist/$(ls dist | grep -i -E '\.(gz)$' | head -1)
-    - pip uninstall unvcf --yes
+- python setup.py build_ext --inplace
+- coverage run --source unvcf -m pytest
+- python setup.py install && pip uninstall unvcf --yes
+- python setup.py sdist
+- pip install dist/$(ls dist | grep -i -E '\.(gz)$' | head -1)
+- pip uninstall unvcf --yes
 after_success:
-    - codecov
+- codecov
 notifications:
   email:
     recipients:
     - danilo.horta@gmail.com
     on_success: never
     on_failure: always
+deploy:
+  provider: pypi
+  user: dhorta
+  password:
+    secure: RvnG1fR8eHzO3gltavUuAHYho/YYGYcmDsq0uIWUNKFLUIg6IMnJvz1iRl2eTyK2kyT4RGyyVdpHhap7NqOaE8toF08+qL/dYZD5FdT4Wm87k+DKideFxCrNtLZ2osqC8g0a6s3H9dfprYqAO70WUCaa0BYWioKfgPEVFxyqTJEfmoJvBL0peDjoMba/xFKoBLSsr+gi+cz5Ufxs58mERjJ8kegIyWN0yhwogHqX+sr4sZgfswV2IaYB0h+O61eQi6KU0P3R/yODG7sIhsWcFBHu89pvbmG23b2xp/XOfmOlbpE+b21dSYZP8phYGWyXLqJwq/6gH/HC6pNwNqFWuTvzjGAGY8v9XUrWmdFC+taKRPfnqYXAsFzfsmSoYjDx6+G8KSft3MZ2djTl7DC4R0zhjewnADK5xvp2u+Wj3qNtoXftyCcHmFT1h/5POk/uA8cjiYoyvP6NtiZdi/57OG5u/VSFd3eiZ3baoFbHDUF5zk/0DWglS/mH9o5XP7jrIdut2vbMT4IZeDnqtUO+kCqyWw1FtMxcRJyKB+1jxFKD6g8BgdCUkSy65196PXCi82DFK8ymhyS1gMyfo6w/OQpGkdNlveZ+U8GnRLdZU6J8Y/BCSuj+Q2lYKKsExUWas4zKBRrdEf9vjqHk5ly5hbUxNt0l/DXNsuIHR2Z43pI=
+  on:
+    tags: true
+    repo: horta/unvcf
+    branch: master
